@@ -1,32 +1,63 @@
-/**************************************************************************
-   mb_transform.c - Coordinate transformation library
+/*!
+ * \file    	mb_transform.c
+ * \brief   	Coordinate transformation library for MB System
+ * \author	David Finlayson
+ * \date	March 28, 2014
+ *
+ * A simple coodinate transformation library for MB System. This library is
+ * designed to perform the simple affine transformations needed during the
+ * routine processing of multibeam data. It supports ridged translations and
+ * rotations about an arbitrary origin and includes a SLERP function for
+ * smoothly interpolating orientations.
+ *
+ * The library (currently) uses a left-handed coordinate system with the
+ * following axis:
+ *
+ * - x-axis positive to the right
+ * - y-axis positive up
+ * - z-axis positive forward
+ *
+ * - Rotation about the x-axis (pitch) is positive nose down
+ * - Rotation about the y-axis (heading) is positive nose right
+ * - Rotation about the z-axis (bank) is positive starboard up
+ *
+ * The library is based on a 4x3 transformation matrix (mb_matrix) which can
+ * be computed very efficiently. Rotations and translations can be applied in
+ * arbitrary order which is necessary to support sonars which do not use
+ * the heading-pitch-bank system (aka roll-pitch-yaw).
+ *
+ * Adapted from:
+ *
+ * Dunn, Fletcher and Parberry, Ian (2002) 3D Math Primer for Graphics
+ * and Game Development. WordWare Publishing, Inc., Sudbury, MA
+ *
+ * Mak, Ronald (2003) The Java Programmer's Guide to Numerical Computing.
+ * Prentice Hall PTR, Upper Saddle River, NJ
+ */
 
-   David Finlayson
-   March 28, 2014
+#include <math.h>
+#include "mb_transform.h"
 
-   Adapted from:
-
-   Dunn, Fletcher and Parberry, Ian (2002) 3D Math Primer for Graphics
-   and Game Development. WordWare Publishing, Inc., Sudbury, MA
-
-   Mak, Ronald (2003) The Java Programmer's Guide to Numerical Computing.
-   Prentice Hall PTR, Upper Saddle River, NJ
-
- *************************************************************************/
- #include <math.h>
- #include "mb_transform.h"
-
-static double wrapPi(double theta);
+static double wrap_pi(double theta);
 static void set_identity(mb_matrix *ma);
 static void concat_transform(mb_matrix *a, mb_matrix *b);
 
-/*------------------------------------------------------------------*/
+/*!
+ * \brief initialize a 4x3 transformation matrix
+ * \param m a transformation matrix
+ */
 void mb_init_transform(mb_matrix *m)
 {
 	set_identity(m);
 }
-/*------------------------------------------------------------------*/
-void mb_transform(mb_matrix *m, mb_vector *p)
+
+
+/*!
+ * \brief apply the transformations defined in m to vector p
+ * \param m transformation matrix
+ * \param p vector representing a point
+ */
+void mb_transform(const mb_matrix *m, mb_vector *p)
 {
 	double x, y, z;
 
@@ -38,7 +69,14 @@ void mb_transform(mb_matrix *m, mb_vector *p)
 	p->y = y;
 	p->z = z;
 }
-/*------------------------------------------------------------------*/
+
+
+/*!
+ * \brief apply a translation action to the transformation matrix
+ * \param dx translate along x-axis (positive to right)
+ * \param dy translate along y-axis (positive up)
+ * \param dz translate along z-axis (positive forward)
+ */
 void mb_concat_translation(mb_matrix *m, double dx, double dy, double dz)
 {
 	mb_matrix translate;
@@ -51,14 +89,17 @@ void mb_concat_translation(mb_matrix *m, double dx, double dy, double dz)
 }
 
 
-/*------------------------------------------------------------------*/
-void mb_concat_rotate_x(mb_matrix *m, double theta)
+/*!
+ * \brief apply a rotation about the x-axis to the transformation matrix
+ * \param pitch angle of declination in radians (positive nose down)
+ */
+void mb_concat_rotate_x(mb_matrix *m, double pitch)
 {
 	double sint, cost;
 	mb_matrix rotate;
 
-	sint = sin(theta);
-	cost = cos(theta);
+	sint = sin(pitch);
+	cost = cos(pitch);
 
 	set_identity(&rotate);
 	rotate.m22 = cost;
@@ -67,14 +108,19 @@ void mb_concat_rotate_x(mb_matrix *m, double theta)
 	rotate.m33 = cost;
 	concat_transform(m, &rotate);
 }
-/*------------------------------------------------------------------*/
-void mb_concat_rotate_y(mb_matrix *m, double theta)
+
+
+/*!
+ * \brief apply a roation about the y-axis to the transformation matrix
+ * \param heading angle of heading in radians (positive to right)
+ */
+void mb_concat_rotate_y(mb_matrix *m, double heading)
 {
 	double sint, cost;
 	mb_matrix rotate;
 
-	sint = sin(theta);
-	cost = cos(theta);
+	sint = sin(heading);
+	cost = cos(heading);
 
 	set_identity(&rotate);
 	rotate.m11 = cost;
@@ -83,14 +129,19 @@ void mb_concat_rotate_y(mb_matrix *m, double theta)
 	rotate.m33 = cost;
 	concat_transform(m, &rotate);
 }
-/*------------------------------------------------------------------*/
-void mb_concat_rotate_z(mb_matrix *m, double theta)
+
+
+/*!
+ * \brief apply rotation about the z-axis to the transformtion matrix
+ * \param bank angle of bank in radians (positive starboard up)
+ */
+void mb_concat_rotate_z(mb_matrix *m, double bank)
 {
 	double sint, cost;
 	mb_matrix rotate;
 
-	sint = sin(theta);
-	cost = cos(theta);
+	sint = sin(bank);
+	cost = cos(bank);
 
 	set_identity(&rotate);
 	rotate.m11 = cost;
@@ -99,8 +150,15 @@ void mb_concat_rotate_z(mb_matrix *m, double theta)
 	rotate.m22 = cost;
 	concat_transform(m, &rotate);
 }
-/*------------------------------------------------------------------*/
-void mb_angles_to_quat(mb_angles *orientation, mb_quaternion *q)
+
+
+/*!
+ * \brief Setup the quaternion to perform an object->inertial rotation, given
+ * 	the orientation in Euler angle format
+ * \param orientation in Euler angle format
+ * \param q object->inertial quaternion
+ */
+void mb_angles_to_quat(const mb_angles *orientation, mb_quaternion *q)
 {
 	double sp, sb, sh;
 	double cp, cb, ch;
@@ -117,8 +175,15 @@ void mb_angles_to_quat(mb_angles *orientation, mb_quaternion *q)
 	q->y = -ch * sp * sb + sh * cp * cb;
 	q->z = -sh * sp * cb + ch * cp * sb;
 }
-/*------------------------------------------------------------------*/
-void mb_quat_to_angles(mb_quaternion *q, mb_angles *orientation)
+
+
+/*!
+ * \brief Setup the Euler angles, given an object -> inertial rotation
+ *	quaternion
+ * \param q object->inertial quaternion
+ * \param orientation orienation in Euler angle format
+ */
+void mb_quat_to_angles(const mb_quaternion *q, mb_angles *orientation)
 {
 	double sp;
 
@@ -140,7 +205,15 @@ void mb_quat_to_angles(mb_quaternion *q, mb_angles *orientation)
 			0.5 - q->x * q->x - q->z * q->z);
 		}
 }
-/*------------------------------------------------------------------*/
+
+
+/*!
+ * \brief Spherical linear interpolation
+ * \param q0 starting orientation as an object->inertial quaternion
+ * \param q1 ending orientation as an object->inertial quaternion
+ * \param t interpolation fraction ranging from 0 to 1 (corresponging to q0 and
+ * q1, respectively)
+ */
 void mb_slerp(
 	const mb_quaternion *q0, const mb_quaternion *q1, double t,
 	mb_quaternion *q)
@@ -178,8 +251,8 @@ void mb_slerp(
 			cosOmega = -cosOmega;
 			}
 
-		/* We should have two unit quaternions, so dot should be <= 1.0 */
-		/* assert(cosOmega < 1.1); */
+		/* We should have two unit quaternions, so dot should be <= 1.0
+		   assert(cosOmega < 1.1); */
 
 		/* Compute interpolation fraction */
 		if (cosOmega > 0.9999)
@@ -205,26 +278,51 @@ void mb_slerp(
 		}
 }	/* mb_slerp */
 
-static double wrapPi(double theta)
+
+
+
+/*!
+ * \brief wrap an angle in range -pi ... pi by adding the correct multiple of
+ *	2pi
+ * \param theta angle to wrap (radians)
+ */
+static double wrap_pi(double theta)
 {
 	theta += kPi;
 	theta -= floor(theta * k1Over2Pi) * k2Pi;
 	theta -= kPi;
-	return theta;
+	return (theta);
 }
-	
-static void set_identity(mb_matrix *ma)
+
+
+/*!
+ * \brief set/reset an mb_matrix back to the identity matrix
+ * \param m transformation matrix to reset
+ */
+static void set_identity(mb_matrix *m)
 {
-	ma->m11 = 1.0; ma->m12 = 0.0; ma->m13 = 0.0;
-	ma->m21 = 0.0; ma->m22 = 1.0; ma->m23 = 0.0;
-	ma->m31 = 0.0; ma->m32 = 0.0; ma->m33 = 1.0;
-	ma->tx = 0.0; ma->ty = 0.0; ma->tz = 0.0;
+	/* rotation matrix */
+	m->m11 = 1.0; m->m12 = 0.0; m->m13 = 0.0;
+	m->m21 = 0.0; m->m22 = 1.0; m->m23 = 0.0;
+	m->m31 = 0.0; m->m32 = 0.0; m->m33 = 1.0;
+
+	/* translation vector */
+	m->tx = 0.0; m->ty = 0.0; m->tz = 0.0;
 }
-static void concat_transform(mb_matrix *a, mb_matrix *b)
+
+
+/*!
+ * /brief concatinates a transformation matrix b onto an existing transformation
+ *	matrix a
+ * /param a transformation matrix a
+ * /param a transformation matrix b
+ */
+static void concat_transform(
+	mb_matrix *a, mb_matrix *b)
 {
 	mb_matrix r;
 
-	/* calculate the upper transformation portion of matrix */
+	/* rotation matrix */
 	r.m11 = a->m11 * b->m11 + a->m12 * b->m21 + a->m13 * b->m31;
 	r.m12 = a->m11 * b->m12 + a->m12 * b->m22 + a->m13 * b->m32;
 	r.m13 = a->m11 * b->m13 + a->m12 * b->m23 + a->m13 * b->m33;
@@ -237,15 +335,16 @@ static void concat_transform(mb_matrix *a, mb_matrix *b)
 	r.m32 = a->m31 * b->m12 + a->m32 * b->m22 + a->m33 * b->m32;
 	r.m33 = a->m31 * b->m13 + a->m32 * b->m23 + a->m33 * b->m33;
 
-	/* calculate the lower translation portion of matrix */
+	/* translation vector */
 	r.tx = a->tx * b->m11 + a->ty * b->m21 + a->tz * b->m31 + b->tx;
 	r.ty = a->tx * b->m12 + a->ty * b->m22 + a->tz * b->m32 + b->ty;
 	r.tz = a->tx * b->m13 + a->ty * b->m23 + a->tz * b->m33 + b->tz;
 
-	/* copy the results back into matrix a */
+	/* copy the results back into first matrix */
 	a->m11 = r.m11; a->m12 = r.m12; a->m13 = r.m13;
 	a->m21 = r.m21; a->m22 = r.m22; a->m23 = r.m23;
 	a->m31 = r.m31; a->m32 = r.m32; a->m33 = r.m33;
 	a->tx = r.tx; a->ty = r.ty; a->tz = r.tz;
 }
+
 

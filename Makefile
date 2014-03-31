@@ -6,6 +6,9 @@ PROGS=test
 
 all: $(PROGS)
 
+docs: doxygen_config
+	doxygen doxygen_config
+
 test: test.c mb_transform.o
 	$(CC) $(CFLAGS) -o test test.c mb_transform.o
 
