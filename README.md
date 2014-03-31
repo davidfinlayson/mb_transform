@@ -1,7 +1,7 @@
 mb_transform
 ============
 
-Develop a small 3D transformation library for MB System
+A small 3D transformation library for MB System
 
 A simple coodinate transformation library for MB System. This library is
 designed to perform the simple affine transformations needed during the
